@@ -141,7 +141,9 @@ class EnvironmentSetup(private val context: Context) {
     /** Check if rootfs is bundled in assets (arm64 only) */
     fun isRootfsBundled(): Boolean {
         return try {
-            context.assets.open(BUNDLED_ROOTFS_ASSET).use { it.available() > 0 }
+            // Just check that the asset can be opened — available() is
+            // unreliable for large compressed assets in APK
+            context.assets.open(BUNDLED_ROOTFS_ASSET).use { it.read(); true }
         } catch (e: Exception) {
             false
         }

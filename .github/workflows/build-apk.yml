@@ -25,11 +25,10 @@ jobs:
         with:
           gradle-version: '8.4'
 
-      # ── Download PRoot + libtalloc binaries from Termux packages ────
-      # Termux provides pre-built PRoot for Android (arm64, arm, x86_64, i686)
-      # PRoot depends on libtalloc.so — we bundle both to avoid library issues.
+      # ── Download PRoot + all dependencies from Termux packages ─────
+      # PRoot depends on: libtalloc, libandroid-shmem — we bundle ALL of them.
 
-      - name: Download and extract PRoot + libtalloc for all architectures
+      - name: Download and extract PRoot + all libs for all architectures
         run: |
           set -e
           mkdir -p app/src/main/assets/proot/lib
@@ -47,37 +46,44 @@ jobs:
               "https://packages.termux.dev/apt/termux-main/dists/stable/main/binary-$TERMUX_ARCH/Packages.gz"
             gunzip -f Packages.gz
 
-            # Find and download PRoot
-            local PROOT_FILE=$(grep -A 15 '^Package: proot$' Packages | grep '^Filename:' | awk '{print $2}' | head -1)
-            echo "Found proot package: $PROOT_FILE"
-            wget -q -O proot.deb "https://packages.termux.dev/apt/termux-main/$PROOT_FILE"
+            # --- Download and extract a .deb package ---
+            extract_deb() {
+              local PKG_NAME="$1"
+              local FILE=$(grep -A 15 "^Package: $PKG_NAME$" Packages | grep '^Filename:' | awk '{print $2}' | head -1)
+              if [ -z "$FILE" ]; then
+                echo "WARNING: Package $PKG_NAME not found!"
+                return 1
+              fi
+              echo "Found $PKG_NAME: $FILE"
+              wget -q -O "$PKG_NAME.deb" "https://packages.termux.dev/apt/termux-main/$FILE"
+              rm -rf control.* data.*
+              ar x "$PKG_NAME.deb"
+              if [ -f data.tar.xz ]; then
+                tar xf data.tar.xz
+              elif [ -f data.tar.zst ]; then
+                zstd -d data.tar.zst && tar xf data.tar
+              fi
+            }
 
-            # Find and download libtalloc
-            local LIBTALLOC_FILE=$(grep -A 15 '^Package: libtalloc$' Packages | grep '^Filename:' | awk '{print $2}' | head -1)
-            echo "Found libtalloc package: $LIBTALLOC_FILE"
-            wget -q -O libtalloc.deb "https://packages.termux.dev/apt/termux-main/$LIBTALLOC_FILE"
-
-            # Extract PRoot binary
-            ar x proot.deb
-            if [ -f data.tar.xz ]; then
-              tar xf data.tar.xz
-            elif [ -f data.tar.zst ]; then
-              zstd -d data.tar.zst && tar xf data.tar
-            fi
+            # Download PRoot binary
+            extract_deb proot
             local PROOT_BIN=$(find . -name proot -type f | head -1)
             cp "$PROOT_BIN" "${GITHUB_WORKSPACE}/app/src/main/assets/proot/${SHORT_ARCH}_proot"
             chmod +x "${GITHUB_WORKSPACE}/app/src/main/assets/proot/${SHORT_ARCH}_proot"
 
-            # Extract libtalloc .so files
-            rm -rf control.* data.*
-            ar x libtalloc.deb
-            if [ -f data.tar.xz ]; then
-              tar xf data.tar.xz
-            elif [ -f data.tar.zst ]; then
-              zstd -d data.tar.zst && tar xf data.tar
-            fi
+            # Check PRoot dependencies
+            echo "--- PRoot dynamic dependencies ---"
+            readelf -d "$PROOT_BIN" 2>/dev/null | grep NEEDED || true
+
+            # Download libtalloc
+            extract_deb libtalloc
             mkdir -p "${GITHUB_WORKSPACE}/app/src/main/assets/proot/lib/${SHORT_ARCH}"
             find . -name 'libtalloc.so*' -exec cp {} "${GITHUB_WORKSPACE}/app/src/main/assets/proot/lib/${SHORT_ARCH}/" \;
+
+            # Download libandroid-shmem
+            rm -rf control.* data.*
+            extract_deb libandroid-shmem
+            find . -name 'libandroid-shmem.so*' -exec cp {} "${GITHUB_WORKSPACE}/app/src/main/assets/proot/lib/${SHORT_ARCH}/" \;
 
             echo "Files for $SHORT_ARCH:"
             ls -la "${GITHUB_WORKSPACE}/app/src/main/assets/proot/${SHORT_ARCH}_proot"
