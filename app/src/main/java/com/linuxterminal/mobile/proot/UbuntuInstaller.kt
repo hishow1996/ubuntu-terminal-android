@@ -225,9 +225,10 @@ class UbuntuInstaller(private val context: Context, private val envSetup: Enviro
             while (reader.readLine().also { line = it } != null) {
                 output.appendLine(line)
                 // Log warnings but continue
-                if (line!!.contains("Operation not permitted") ||
-                    line.contains("Cannot")) {
-                    Log.w(TAG, "tar warning: $line")
+                val currentLine = line ?: ""
+                if (currentLine.contains("Operation not permitted") ||
+                    currentLine.contains("Cannot")) {
+                    Log.w(TAG, "tar warning: $currentLine")
                 }
             }
             val exitCode = process.waitFor()
