@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">Ubuntu Terminal</string>
+    <string name="splash_subtitle">Real Linux on your phone</string>
+    <string name="splash_initializing">Initializing…</string>
+    <string name="settings_title">Settings</string>
+
+    <!-- Settings -->
+    <string name="pref_font_size_title">Font Size</string>
+    <string name="pref_font_size_summary">Terminal text size (sp)</string>
+    <string name="pref_font_size_default">14</string>
+    <string name="pref_font_scale_title">Font Scale</string>
+    <string name="pref_font_scale_summary">Scale factor for terminal font</string>
+    <string name="pref_theme_title">Color Theme</string>
+    <string name="pref_theme_summary">Choose terminal color scheme</string>
+    <string name="pref_show_extra_keys_title">Show Extra Keys</string>
+    <string name="pref_show_extra_keys_summary">Display the special keys bar above keyboard</string>
+</resources>

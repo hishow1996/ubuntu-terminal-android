@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Ubuntu-inspired color palette -->
+    <color name="ubuntu_orange">#E95420</color>
+    <color name="ubuntu_aubergine">#772953</color>
+    <color name="ubuntu_warm_grey">#AEA79F</color>
+
+    <!-- Terminal colors -->
+    <color name="terminal_bg">#1E1E2E</color>
+    <color name="terminal_bg_dark">#181825</color>
+    <color name="terminal_bg_light">#2A2A3C</color>
+    <color name="terminal_fg">#D4D4D4</color>
+    <color name="terminal_fg_dim">#888888</color>
+    <color name="terminal_fg_bright">#FFFFFF</color>
+
+    <!-- Extra key colors -->
+    <color name="extra_key_bg">#2A2A3C</color>
+    <color name="extra_key_bg_pressed">#3A3A4C</color>
+    <color name="extra_key_text">#D4D4D4</color>
+    <color name="extra_key_selected">#E95420</color>
+
+    <!-- Standard colors -->
+    <color name="black">#000000</color>
+    <color name="white">#FFFFFF</color>
+</resources>

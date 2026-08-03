@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Ubuntu-style circle -->
+    <path
+        android:fillColor="#E95420"
+        android:pathData="M54,30 m-18,0 a18,18 0,1 1,36 0 a18,18 0,1 1,-36 0" />
+    <!-- Terminal prompt > -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M42,44 l4,-4 l0,8 l4,0 l-4,4 l0,8 l4,4 l-8,-8 z" />
+    <!-- Ubuntu dots -->
+    <path
+        android:fillColor="#E95420"
+        android:pathData="M54,30 m-3,-12 a3,3 0,1 1,6 0 a3,3 0,1 1,-6 0" />
+</vector>

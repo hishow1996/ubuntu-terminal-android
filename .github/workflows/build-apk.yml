@@ -1,0 +1,173 @@
+name: Build Ubuntu Terminal APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.4'
+
+      # ── Download PRoot binaries from Termux packages ────────────────
+      # Termux provides pre-built PRoot for Android (arm64, arm, x86_64, i686)
+      # We extract the binary from the .deb and include it in the APK assets.
+
+      - name: Download and extract PRoot for arm64
+        run: |
+          set -e
+          mkdir -p app/src/main/assets/proot
+          # Get the Packages index for aarch64
+          wget -q -O /tmp/Packages-aarch64.gz \
+            "https://packages.termux.dev/apt/termux-main/dists/stable/main/binary-aarch64/Packages.gz"
+          gunzip -f /tmp/Packages-aarch64.gz
+          # Find the proot package filename
+          PROOT_FILE=$(grep -A 15 '^Package: proot$' /tmp/Packages-aarch64 | grep '^Filename:' | awk '{print $2}' | head -1)
+          echo "Found proot package: $PROOT_FILE"
+          if [ -z "$PROOT_FILE" ]; then
+            echo "WARNING: Could not find proot in Packages index, trying known URL"
+            PROOT_FILE="pool/main/p/proot/proot_5.1.0-7_aarch64.deb"
+          fi
+          wget -q -O /tmp/proot-aarch64.deb "https://packages.termux.dev/apt/termux-main/$PROOT_FILE"
+          cd /tmp && mkdir -p proot-extract-aarch64 && cd proot-extract-aarch64
+          ar x /tmp/proot-aarch64.deb
+          # Try xz, zst, or gz
+          if [ -f data.tar.xz ]; then
+            tar xJf data.tar.xz
+          elif [ -f data.tar.zst ]; then
+            tar --zstd -xf data.tar.zst || zstd -d data.tar.zst && tar xf data.tar
+          elif [ -f data.tar.gz ]; then
+            tar xzf data.tar.gz
+          fi
+          # Find and copy the proot binary
+          find . -name proot -type f
+          cp $(find . -name proot -type f | head -1) ${GITHUB_WORKSPACE}/app/src/main/assets/proot/arm64_proot
+          chmod +x ${GITHUB_WORKSPACE}/app/src/main/assets/proot/arm64_proot
+          echo "arm64 PRoot binary ready"
+
+      - name: Download and extract PRoot for arm
+        run: |
+          set -e
+          wget -q -O /tmp/Packages-arm.gz \
+            "https://packages.termux.dev/apt/termux-main/dists/stable/main/binary-arm/Packages.gz"
+          gunzip -f /tmp/Packages-arm.gz
+          PROOT_FILE=$(grep -A 15 '^Package: proot$' /tmp/Packages-arm | grep '^Filename:' | awk '{print $2}' | head -1)
+          echo "Found proot package: $PROOT_FILE"
+          if [ -z "$PROOT_FILE" ]; then
+            PROOT_FILE="pool/main/p/proot/proot_5.1.0-7_arm.deb"
+          fi
+          wget -q -O /tmp/proot-arm.deb "https://packages.termux.dev/apt/termux-main/$PROOT_FILE"
+          cd /tmp && mkdir -p proot-extract-arm && cd proot-extract-arm
+          ar x /tmp/proot-arm.deb
+          if [ -f data.tar.xz ]; then
+            tar xJf data.tar.xz
+          elif [ -f data.tar.zst ]; then
+            tar --zstd -xf data.tar.zst || zstd -d data.tar.zst && tar xf data.tar
+          elif [ -f data.tar.gz ]; then
+            tar xzf data.tar.gz
+          fi
+          cp $(find . -name proot -type f | head -1) ${GITHUB_WORKSPACE}/app/src/main/assets/proot/armhf_proot
+          chmod +x ${GITHUB_WORKSPACE}/app/src/main/assets/proot/armhf_proot
+          echo "arm PRoot binary ready"
+
+      - name: Download and extract PRoot for x86_64
+        run: |
+          set -e
+          wget -q -O /tmp/Packages-x86_64.gz \
+            "https://packages.termux.dev/apt/termux-main/dists/stable/main/binary-x86_64/Packages.gz"
+          gunzip -f /tmp/Packages-x86_64.gz
+          PROOT_FILE=$(grep -A 15 '^Package: proot$' /tmp/Packages-x86_64 | grep '^Filename:' | awk '{print $2}' | head -1)
+          echo "Found proot package: $PROOT_FILE"
+          if [ -z "$PROOT_FILE" ]; then
+            PROOT_FILE="pool/main/p/proot/proot_5.1.0-7_x86_64.deb"
+          fi
+          wget -q -O /tmp/proot-x86_64.deb "https://packages.termux.dev/apt/termux-main/$PROOT_FILE"
+          cd /tmp && mkdir -p proot-extract-x86_64 && cd proot-extract-x86_64
+          ar x /tmp/proot-x86_64.deb
+          if [ -f data.tar.xz ]; then
+            tar xJf data.tar.xz
+          elif [ -f data.tar.zst ]; then
+            tar --zstd -xf data.tar.zst || zstd -d data.tar.zst && tar xf data.tar
+          elif [ -f data.tar.gz ]; then
+            tar xzf data.tar.gz
+          fi
+          cp $(find . -name proot -type f | head -1) ${GITHUB_WORKSPACE}/app/src/main/assets/proot/x86_64_proot
+          chmod +x ${GITHUB_WORKSPACE}/app/src/main/assets/proot/x86_64_proot
+          echo "x86_64 PRoot binary ready"
+
+      - name: Download and extract PRoot for x86
+        run: |
+          set -e
+          wget -q -O /tmp/Packages-i686.gz \
+            "https://packages.termux.dev/apt/termux-main/dists/stable/main/binary-i686/Packages.gz"
+          gunzip -f /tmp/Packages-i686.gz
+          PROOT_FILE=$(grep -A 15 '^Package: proot$' /tmp/Packages-i686 | grep '^Filename:' | awk '{print $2}' | head -1)
+          echo "Found proot package: $PROOT_FILE"
+          if [ -z "$PROOT_FILE" ]; then
+            PROOT_FILE="pool/main/p/proot/proot_5.1.0-7_i686.deb"
+          fi
+          wget -q -O /tmp/proot-i686.deb "https://packages.termux.dev/apt/termux-main/$PROOT_FILE"
+          cd /tmp && mkdir -p proot-extract-i686 && cd proot-extract-i686
+          ar x /tmp/proot-i686.deb
+          if [ -f data.tar.xz ]; then
+            tar xJf data.tar.xz
+          elif [ -f data.tar.zst ]; then
+            tar --zstd -xf data.tar.zst || zstd -d data.tar.zst && tar xf data.tar
+          elif [ -f data.tar.gz ]; then
+            tar xzf data.tar.gz
+          fi
+          cp $(find . -name proot -type f | head -1) ${GITHUB_WORKSPACE}/app/src/main/assets/proot/x86_proot
+          chmod +x ${GITHUB_WORKSPACE}/app/src/main/assets/proot/x86_proot
+          echo "x86 PRoot binary ready"
+
+      - name: Verify PRoot binaries
+        run: |
+          echo "=== PRoot binary listing ==="
+          ls -la app/src/main/assets/proot/
+          file app/src/main/assets/proot/*
+
+      - name: Build Debug APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Build Release APK
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: UbuntuTerminal-debug
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 90
+
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: UbuntuTerminal-release
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 90
+
+      - name: Upload Build Logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            app/build/reports/
+            app/build/outputs/logs/
+          retention-days: 7

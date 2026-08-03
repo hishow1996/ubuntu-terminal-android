@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <SeekBarPreference
+        android:key="font_size"
+        android:title="@string/pref_font_size_title"
+        android:summary="@string/pref_font_size_summary"
+        android:defaultValue="@string/pref_font_size_default"
+        android:min="8"
+        android:max="28" />
+
+    <SwitchPreference
+        android:key="show_extra_keys"
+        android:title="@string/pref_show_extra_keys_title"
+        android:summary="@string/pref_show_extra_keys_summary"
+        android:defaultValue="true" />
+
+</PreferenceScreen>
