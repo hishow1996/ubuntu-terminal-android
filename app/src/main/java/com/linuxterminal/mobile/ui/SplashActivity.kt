@@ -56,13 +56,15 @@ class SplashActivity : AppCompatActivity() {
     private fun startSetup() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                // Step 1: Extract PRoot binary
-                updateProgress(5, "Setting up PRoot...")
-                if (!envSetup.extractPRootBinary()) {
+                // Step 1: ALWAYS extract PRoot binary + .so files from assets.
+                // No caching — ensures new .so files (libandroid-shmem etc.) are
+                // always extracted even after app update.
+                updateProgress(5, "Setting up PRoot and libraries...")
+                val extracted = envSetup.extractPRootBinary()
+                if (!extracted) {
                     withContext(Dispatchers.Main) {
-                        logText.text = "Note: PRoot binary not bundled, will download."
+                        logText.text = "Note: PRoot not bundled, trying download..."
                     }
-                    // Try downloading PRoot at runtime
                     downloadPRoot()
                 }
 

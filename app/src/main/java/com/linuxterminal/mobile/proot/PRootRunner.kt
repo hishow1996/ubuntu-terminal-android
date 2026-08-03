@@ -36,8 +36,17 @@ class PRootRunner(private val context: Context, private val envSetup: Environmen
     ): List<String> {
         val cmd = mutableListOf<String>()
 
-        // PRoot binary
-        cmd.add(envSetup.prootBinary.absolutePath)
+        // Use the wrapper script instead of calling PRoot directly.
+        // The wrapper sets LD_LIBRARY_PATH so the linker finds libtalloc.so
+        // and libandroid-shmem.so. ProcessBuilder env is unreliable on Android.
+        val wrapperScript = File(envSetup.prootDir, "run_proot.sh")
+        if (wrapperScript.exists() && wrapperScript.canExecute()) {
+            cmd.add("/system/bin/sh")
+            cmd.add(wrapperScript.absolutePath)
+        } else {
+            // Fallback: call PRoot directly (LD_LIBRARY_PATH from env)
+            cmd.add(envSetup.prootBinary.absolutePath)
+        }
 
         // Root filesystem
         cmd.add("-r")

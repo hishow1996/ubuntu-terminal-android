@@ -66,31 +66,33 @@ class EnvironmentSetup(private val context: Context) {
         }
     }
 
-    /** Copy PRoot binary and libtalloc from assets to data directory */
+    /** Copy PRoot binary and all libraries from assets to data directory.
+     *  Always extracts — no caching, because new versions may add new .so files. */
     fun extractPRootBinary(): Boolean {
-        if (prootBinary.exists() && prootBinary.canExecute() && prootLibDir.exists()) {
-            return true
-        }
-
         val arch = getArch()
         val assetName = "proot/${arch}_proot"
 
         return try {
             prootDir.mkdirs()
             prootBinary.parentFile?.mkdirs()
+
+            // Always re-extract the PRoot binary
             context.assets.open(assetName).use { input ->
                 FileOutputStream(prootBinary).use { output ->
                     input.copyTo(output)
                 }
             }
-            // Set executable permission
             prootBinary.setExecutable(true, true)
             Log.i(TAG, "PRoot binary extracted to ${prootBinary.absolutePath}")
 
-            // Also extract libtalloc.so files
+            // Always re-extract all .so files (libtalloc, libandroid-shmem, etc.)
             prootLibDir.mkdirs()
+            // Clear old .so files first
+            prootLibDir.listFiles()?.forEach { it.delete() }
+
             val libAssetPath = "proot/lib/$arch"
             val libFiles = context.assets.list(libAssetPath) ?: emptyArray()
+            Log.i(TAG, "Found ${libFiles.size} library files in assets for arch=$arch")
             for (libFile in libFiles) {
                 val libPath = "$libAssetPath/$libFile"
                 val destFile = File(prootLibDir, libFile)
@@ -99,8 +101,23 @@ class EnvironmentSetup(private val context: Context) {
                         input.copyTo(output)
                     }
                 }
-                Log.i(TAG, "Extracted library: ${destFile.name}")
+                destFile.setExecutable(true, true)
+                destFile.setReadable(true, true)
+                Log.i(TAG, "Extracted library: ${destFile.name} (${destFile.length()} bytes)")
             }
+
+            // Also create a wrapper script that sets LD_LIBRARY_PATH
+            // This is more reliable than relying on ProcessBuilder env
+            val wrapperScript = File(prootDir, "run_proot.sh")
+            wrapperScript.writeText("""#!/system/bin/sh
+export LD_LIBRARY_PATH=${prootLibDir.absolutePath}
+export PROOT_TMP_DIR=${tmpDir.absolutePath}
+export PROOT_NO_SECCOMP=1
+exec ${prootBinary.absolutePath} "$@"
+""")
+            wrapperScript.setExecutable(true, true)
+            Log.i(TAG, "Wrapper script created at ${wrapperScript.absolutePath}")
+
             true
         } catch (e: IOException) {
             Log.e(TAG, "Failed to extract PRoot from assets", e)
@@ -141,9 +158,10 @@ class EnvironmentSetup(private val context: Context) {
     /** Check if rootfs is bundled in assets (arm64 only) */
     fun isRootfsBundled(): Boolean {
         return try {
-            // Just check that the asset can be opened — available() is
-            // unreliable for large compressed assets in APK
-            context.assets.open(BUNDLED_ROOTFS_ASSET).use { it.read(); true }
+            // Use assets.list() — most reliable way to check if asset exists
+            // available() and read() are unreliable for large compressed assets
+            val files = context.assets.list("ubuntu") ?: return false
+            files.any { it == "ubuntu-rootfs.tar.gz" }
         } catch (e: Exception) {
             false
         }

@@ -56,7 +56,8 @@ jobs:
               fi
               echo "Found $PKG_NAME: $FILE"
               wget -q -O "$PKG_NAME.deb" "https://packages.termux.dev/apt/termux-main/$FILE"
-              rm -rf control.* data.*
+              # Clean up ALL previous extraction artifacts
+              rm -rf control.* data.* data control.tar.* data.tar.*
               ar x "$PKG_NAME.deb"
               if [ -f data.tar.xz ]; then
                 tar xf data.tar.xz
@@ -98,17 +99,30 @@ jobs:
           download_arch x86_64 x86_64
           download_arch i686 x86
 
-      - name: Verify PRoot binaries
+      - name: Verify PRoot binaries and libraries
         run: |
           echo "=== PRoot binary + library listing ==="
           find app/src/main/assets/proot/ -type f -exec ls -la {} \;
+          echo ""
+          echo "--- PRoot binaries ---"
           file app/src/main/assets/proot/*_proot
-          echo "--- libraries ---"
-          find app/src/main/assets/proot/lib/ -type f -exec file {} \;
+          echo ""
+          echo "--- All .so files per arch ---"
+          find app/src/main/assets/proot/lib/ -type f | while read f; do
+            echo "$f: $(file "$f" | cut -d: -f2)"
+          done
+          echo ""
+          echo "--- Dynamic dependencies (arm64 PRoot) ---"
+          readelf -d app/src/main/assets/proot/arm64_proot 2>/dev/null | grep NEEDED || echo "readelf not available"
+          echo ""
+          # Verify critical libraries are present
+          for arch in arm64 armhf x86_64 x86; do
+            echo "=== Checking $arch ==="
+            ls app/src/main/assets/proot/lib/$arch/ 2>/dev/null || echo "WARNING: No lib dir for $arch!"
+          done
 
       # ── Download Ubuntu rootfs ─────────────────────────────────────
       # Bundle the Ubuntu 22.04 minimal rootfs directly in the APK.
-      # Most Android devices are arm64-v8a, so we bundle the arm64 rootfs.
 
       - name: Download Ubuntu rootfs
         run: |
@@ -121,6 +135,14 @@ jobs:
           ls -lh app/src/main/assets/ubuntu/ubuntu-rootfs.tar.gz
           file app/src/main/assets/ubuntu/ubuntu-rootfs.tar.gz
           gzip -t app/src/main/assets/ubuntu/ubuntu-rootfs.tar.gz && echo "Gzip integrity OK"
+
+      - name: Verify final assets
+        run: |
+          echo "=== Final assets tree ==="
+          find app/src/main/assets/ -type f | sort
+          echo ""
+          echo "=== Total assets size ==="
+          du -sh app/src/main/assets/
 
       - name: Build Debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
