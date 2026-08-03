@@ -122,8 +122,9 @@ class PRootRunner(private val context: Context, private val envSetup: Environmen
         )
     }
 
-    /** Get environment variables for PRoot */
+    /** Get environment variables for PRoot, including LD_LIBRARY_PATH for libtalloc */
     fun getEnvironment(): Map<String, String> {
+        val libPath = envSetup.prootLibDir.absolutePath
         return mapOf(
             "HOME" to "/root",
             "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -135,7 +136,9 @@ class PRootRunner(private val context: Context, private val envSetup: Environmen
             "LOGNAME" to "root",
             "HOSTNAME" to "ubuntu",
             "PROOT_NO_SECCOMP" to "1",
-            "PROOT_TMP_DIR" to envSetup.getProotTmpDir()
+            "PROOT_TMP_DIR" to envSetup.getProotTmpDir(),
+            "LD_LIBRARY_PATH" to libPath,
+            "LD_PRELOAD" to ""
         )
     }
 

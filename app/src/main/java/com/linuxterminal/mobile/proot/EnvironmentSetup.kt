@@ -32,6 +32,7 @@ class EnvironmentSetup(private val context: Context) {
     val rootfsDir: File = File(dataDir, "rootfs")
     val prootDir: File = File(dataDir, "proot")
     val prootBinary: File = File(prootDir, "proot")
+    val prootLibDir: File = File(prootDir, "lib")
     val tmpDir: File = File(dataDir, "tmp")
 
     // Status
@@ -61,13 +62,13 @@ class EnvironmentSetup(private val context: Context) {
             }
         } catch (e: IOException) {
             // Check if already extracted
-            return prootBinary.exists() && prootBinary.canExecute()
+            return prootBinary.exists() && prootBinary.canExecute() && prootLibDir.exists()
         }
     }
 
-    /** Copy PRoot binary from assets to data directory */
+    /** Copy PRoot binary and libtalloc from assets to data directory */
     fun extractPRootBinary(): Boolean {
-        if (prootBinary.exists() && prootBinary.canExecute()) {
+        if (prootBinary.exists() && prootBinary.canExecute() && prootLibDir.exists()) {
             return true
         }
 
@@ -85,6 +86,21 @@ class EnvironmentSetup(private val context: Context) {
             // Set executable permission
             prootBinary.setExecutable(true, true)
             Log.i(TAG, "PRoot binary extracted to ${prootBinary.absolutePath}")
+
+            // Also extract libtalloc.so files
+            prootLibDir.mkdirs()
+            val libAssetPath = "proot/lib/$arch"
+            val libFiles = context.assets.list(libAssetPath) ?: emptyArray()
+            for (libFile in libFiles) {
+                val libPath = "$libAssetPath/$libFile"
+                val destFile = File(prootLibDir, libFile)
+                context.assets.open(libPath).use { input ->
+                    FileOutputStream(destFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                Log.i(TAG, "Extracted library: ${destFile.name}")
+            }
             true
         } catch (e: IOException) {
             Log.e(TAG, "Failed to extract PRoot from assets", e)

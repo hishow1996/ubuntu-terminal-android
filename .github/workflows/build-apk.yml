@@ -1,4 +1,4 @@
-name: Build Ubuntu Terminal APK
+name: Build TuxBox APK
 
 on:
   push:
@@ -25,128 +25,84 @@ jobs:
         with:
           gradle-version: '8.4'
 
-      # ── Download PRoot binaries from Termux packages ────────────────
+      # ── Download PRoot + libtalloc binaries from Termux packages ────
       # Termux provides pre-built PRoot for Android (arm64, arm, x86_64, i686)
-      # We extract the binary from the .deb and include it in the APK assets.
+      # PRoot depends on libtalloc.so — we bundle both to avoid library issues.
 
-      - name: Download and extract PRoot for arm64
+      - name: Download and extract PRoot + libtalloc for all architectures
         run: |
           set -e
-          mkdir -p app/src/main/assets/proot
-          # Get the Packages index for aarch64
-          wget -q -O /tmp/Packages-aarch64.gz \
-            "https://packages.termux.dev/apt/termux-main/dists/stable/main/binary-aarch64/Packages.gz"
-          gunzip -f /tmp/Packages-aarch64.gz
-          # Find the proot package filename
-          PROOT_FILE=$(grep -A 15 '^Package: proot$' /tmp/Packages-aarch64 | grep '^Filename:' | awk '{print $2}' | head -1)
-          echo "Found proot package: $PROOT_FILE"
-          if [ -z "$PROOT_FILE" ]; then
-            echo "WARNING: Could not find proot in Packages index, trying known URL"
-            PROOT_FILE="pool/main/p/proot/proot_5.1.0-7_aarch64.deb"
-          fi
-          wget -q -O /tmp/proot-aarch64.deb "https://packages.termux.dev/apt/termux-main/$PROOT_FILE"
-          cd /tmp && mkdir -p proot-extract-aarch64 && cd proot-extract-aarch64
-          ar x /tmp/proot-aarch64.deb
-          # Try xz, zst, or gz
-          if [ -f data.tar.xz ]; then
-            tar xJf data.tar.xz
-          elif [ -f data.tar.zst ]; then
-            tar --zstd -xf data.tar.zst || zstd -d data.tar.zst && tar xf data.tar
-          elif [ -f data.tar.gz ]; then
-            tar xzf data.tar.gz
-          fi
-          # Find and copy the proot binary
-          find . -name proot -type f
-          cp $(find . -name proot -type f | head -1) ${GITHUB_WORKSPACE}/app/src/main/assets/proot/arm64_proot
-          chmod +x ${GITHUB_WORKSPACE}/app/src/main/assets/proot/arm64_proot
-          echo "arm64 PRoot binary ready"
+          mkdir -p app/src/main/assets/proot/lib
 
-      - name: Download and extract PRoot for arm
-        run: |
-          set -e
-          wget -q -O /tmp/Packages-arm.gz \
-            "https://packages.termux.dev/apt/termux-main/dists/stable/main/binary-arm/Packages.gz"
-          gunzip -f /tmp/Packages-arm.gz
-          PROOT_FILE=$(grep -A 15 '^Package: proot$' /tmp/Packages-arm | grep '^Filename:' | awk '{print $2}' | head -1)
-          echo "Found proot package: $PROOT_FILE"
-          if [ -z "$PROOT_FILE" ]; then
-            PROOT_FILE="pool/main/p/proot/proot_5.1.0-7_arm.deb"
-          fi
-          wget -q -O /tmp/proot-arm.deb "https://packages.termux.dev/apt/termux-main/$PROOT_FILE"
-          cd /tmp && mkdir -p proot-extract-arm && cd proot-extract-arm
-          ar x /tmp/proot-arm.deb
-          if [ -f data.tar.xz ]; then
-            tar xJf data.tar.xz
-          elif [ -f data.tar.zst ]; then
-            tar --zstd -xf data.tar.zst || zstd -d data.tar.zst && tar xf data.tar
-          elif [ -f data.tar.gz ]; then
-            tar xzf data.tar.gz
-          fi
-          cp $(find . -name proot -type f | head -1) ${GITHUB_WORKSPACE}/app/src/main/assets/proot/armhf_proot
-          chmod +x ${GITHUB_WORKSPACE}/app/src/main/assets/proot/armhf_proot
-          echo "arm PRoot binary ready"
+          download_arch() {
+            local TERMUX_ARCH="$1"   # aarch64, arm, x86_64, i686
+            local SHORT_ARCH="$2"    # arm64, armhf, x86_64, x86
+            local WORK_DIR="/tmp/extract-$TERMUX_ARCH"
+            mkdir -p "$WORK_DIR" && cd "$WORK_DIR"
 
-      - name: Download and extract PRoot for x86_64
-        run: |
-          set -e
-          wget -q -O /tmp/Packages-x86_64.gz \
-            "https://packages.termux.dev/apt/termux-main/dists/stable/main/binary-x86_64/Packages.gz"
-          gunzip -f /tmp/Packages-x86_64.gz
-          PROOT_FILE=$(grep -A 15 '^Package: proot$' /tmp/Packages-x86_64 | grep '^Filename:' | awk '{print $2}' | head -1)
-          echo "Found proot package: $PROOT_FILE"
-          if [ -z "$PROOT_FILE" ]; then
-            PROOT_FILE="pool/main/p/proot/proot_5.1.0-7_x86_64.deb"
-          fi
-          wget -q -O /tmp/proot-x86_64.deb "https://packages.termux.dev/apt/termux-main/$PROOT_FILE"
-          cd /tmp && mkdir -p proot-extract-x86_64 && cd proot-extract-x86_64
-          ar x /tmp/proot-x86_64.deb
-          if [ -f data.tar.xz ]; then
-            tar xJf data.tar.xz
-          elif [ -f data.tar.zst ]; then
-            tar --zstd -xf data.tar.zst || zstd -d data.tar.zst && tar xf data.tar
-          elif [ -f data.tar.gz ]; then
-            tar xzf data.tar.gz
-          fi
-          cp $(find . -name proot -type f | head -1) ${GITHUB_WORKSPACE}/app/src/main/assets/proot/x86_64_proot
-          chmod +x ${GITHUB_WORKSPACE}/app/src/main/assets/proot/x86_64_proot
-          echo "x86_64 PRoot binary ready"
+            echo "=== Downloading for $TERMUX_ARCH ($SHORT_ARCH) ==="
 
-      - name: Download and extract PRoot for x86
-        run: |
-          set -e
-          wget -q -O /tmp/Packages-i686.gz \
-            "https://packages.termux.dev/apt/termux-main/dists/stable/main/binary-i686/Packages.gz"
-          gunzip -f /tmp/Packages-i686.gz
-          PROOT_FILE=$(grep -A 15 '^Package: proot$' /tmp/Packages-i686 | grep '^Filename:' | awk '{print $2}' | head -1)
-          echo "Found proot package: $PROOT_FILE"
-          if [ -z "$PROOT_FILE" ]; then
-            PROOT_FILE="pool/main/p/proot/proot_5.1.0-7_i686.deb"
-          fi
-          wget -q -O /tmp/proot-i686.deb "https://packages.termux.dev/apt/termux-main/$PROOT_FILE"
-          cd /tmp && mkdir -p proot-extract-i686 && cd proot-extract-i686
-          ar x /tmp/proot-i686.deb
-          if [ -f data.tar.xz ]; then
-            tar xJf data.tar.xz
-          elif [ -f data.tar.zst ]; then
-            tar --zstd -xf data.tar.zst || zstd -d data.tar.zst && tar xf data.tar
-          elif [ -f data.tar.gz ]; then
-            tar xzf data.tar.gz
-          fi
-          cp $(find . -name proot -type f | head -1) ${GITHUB_WORKSPACE}/app/src/main/assets/proot/x86_proot
-          chmod +x ${GITHUB_WORKSPACE}/app/src/main/assets/proot/x86_proot
-          echo "x86 PRoot binary ready"
+            # Get Packages index
+            wget -q -O Packages.gz \
+              "https://packages.termux.dev/apt/termux-main/dists/stable/main/binary-$TERMUX_ARCH/Packages.gz"
+            gunzip -f Packages.gz
+
+            # Find and download PRoot
+            local PROOT_FILE=$(grep -A 15 '^Package: proot$' Packages | grep '^Filename:' | awk '{print $2}' | head -1)
+            echo "Found proot package: $PROOT_FILE"
+            wget -q -O proot.deb "https://packages.termux.dev/apt/termux-main/$PROOT_FILE"
+
+            # Find and download libtalloc
+            local LIBTALLOC_FILE=$(grep -A 15 '^Package: libtalloc$' Packages | grep '^Filename:' | awk '{print $2}' | head -1)
+            echo "Found libtalloc package: $LIBTALLOC_FILE"
+            wget -q -O libtalloc.deb "https://packages.termux.dev/apt/termux-main/$LIBTALLOC_FILE"
+
+            # Extract PRoot binary
+            ar x proot.deb
+            if [ -f data.tar.xz ]; then
+              tar xf data.tar.xz
+            elif [ -f data.tar.zst ]; then
+              zstd -d data.tar.zst && tar xf data.tar
+            fi
+            local PROOT_BIN=$(find . -name proot -type f | head -1)
+            cp "$PROOT_BIN" "${GITHUB_WORKSPACE}/app/src/main/assets/proot/${SHORT_ARCH}_proot"
+            chmod +x "${GITHUB_WORKSPACE}/app/src/main/assets/proot/${SHORT_ARCH}_proot"
+
+            # Extract libtalloc .so files
+            rm -rf control.* data.*
+            ar x libtalloc.deb
+            if [ -f data.tar.xz ]; then
+              tar xf data.tar.xz
+            elif [ -f data.tar.zst ]; then
+              zstd -d data.tar.zst && tar xf data.tar
+            fi
+            mkdir -p "${GITHUB_WORKSPACE}/app/src/main/assets/proot/lib/${SHORT_ARCH}"
+            find . -name 'libtalloc.so*' -exec cp {} "${GITHUB_WORKSPACE}/app/src/main/assets/proot/lib/${SHORT_ARCH}/" \;
+
+            echo "Files for $SHORT_ARCH:"
+            ls -la "${GITHUB_WORKSPACE}/app/src/main/assets/proot/${SHORT_ARCH}_proot"
+            ls -la "${GITHUB_WORKSPACE}/app/src/main/assets/proot/lib/${SHORT_ARCH}/"
+
+            # Clean up
+            cd / && rm -rf "$WORK_DIR"
+          }
+
+          download_arch aarch64 arm64
+          download_arch arm armhf
+          download_arch x86_64 x86_64
+          download_arch i686 x86
 
       - name: Verify PRoot binaries
         run: |
-          echo "=== PRoot binary listing ==="
-          ls -la app/src/main/assets/proot/
-          file app/src/main/assets/proot/*
+          echo "=== PRoot binary + library listing ==="
+          find app/src/main/assets/proot/ -type f -exec ls -la {} \;
+          file app/src/main/assets/proot/*_proot
+          echo "--- libraries ---"
+          find app/src/main/assets/proot/lib/ -type f -exec file {} \;
 
       # ── Download Ubuntu rootfs ─────────────────────────────────────
       # Bundle the Ubuntu 22.04 minimal rootfs directly in the APK.
       # Most Android devices are arm64-v8a, so we bundle the arm64 rootfs.
-      # For other architectures, the app falls back to runtime download.
-      # The tar.gz is ~30MB compressed, making the total APK ~40MB.
 
       - name: Download Ubuntu rootfs
         run: |
@@ -157,7 +113,6 @@ jobs:
             "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-arm64.tar.gz"
           echo "Downloaded rootfs:"
           ls -lh app/src/main/assets/ubuntu/ubuntu-rootfs.tar.gz
-          # Verify it's a valid gzip
           file app/src/main/assets/ubuntu/ubuntu-rootfs.tar.gz
           gzip -t app/src/main/assets/ubuntu/ubuntu-rootfs.tar.gz && echo "Gzip integrity OK"
 
@@ -170,14 +125,14 @@ jobs:
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: UbuntuTerminal-debug
+          name: TuxBox-debug
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 90
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: UbuntuTerminal-release
+          name: TuxBox-release
           path: app/build/outputs/apk/release/*.apk
           retention-days: 90
 

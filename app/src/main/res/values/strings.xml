@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Ubuntu Terminal</string>
+    <string name="app_name">TuxBox</string>
     <string name="splash_subtitle">Real Linux on your phone</string>
     <string name="splash_initializing">Initializing…</string>
     <string name="settings_title">Settings</string>
