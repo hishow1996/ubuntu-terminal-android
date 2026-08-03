@@ -73,6 +73,60 @@ class UbuntuInstaller(private val context: Context, private val envSetup: Enviro
         }
     }
 
+    /**
+     * Extract the bundled Ubuntu rootfs from APK assets.
+     * No download needed — the rootfs ships inside the APK.
+     */
+    fun installBundledRootfs() {
+        listener?.onProgress(0, "Preparing bundled Ubuntu rootfs...")
+        listener?.onLog("Using bundled rootfs from APK assets")
+
+        val tempFile = File(envSetup.dataDir, "rootfs.tar.gz")
+        tempFile.parentFile?.mkdirs()
+
+        try {
+            // Step 1: Copy bundled rootfs from assets to temp file
+            listener?.onProgress(5, "Reading bundled Ubuntu rootfs...")
+            val assetStream = envSetup.openBundledRootfs()
+            val totalSize = assetStream.available().toLong()
+            listener?.onLog("Bundled rootfs size: ${totalSize / 1024 / 1024} MB")
+
+            var copied = 0L
+            FileOutputStream(tempFile).use { output ->
+                val buffer = ByteArray(BUFFER_SIZE * 4)
+                var bytesRead: Int
+                while (assetStream.read(buffer).also { bytesRead = it } > 0) {
+                    output.write(buffer, 0, bytesRead)
+                    copied += bytesRead
+                    val percent = (5 + (copied.toDouble() / totalSize * 20)).toInt()
+                    listener?.onProgress(percent.coerceAtMost(25),
+                        "Reading rootfs... ${copied / 1024 / 1024} MB")
+                }
+            }
+            assetStream.close()
+            listener?.onProgress(25, "Rootfs copied. Extracting...")
+
+            // Step 2: Extract rootfs
+            listener?.onProgress(30, "Extracting Ubuntu rootfs...")
+            envSetup.rootfsDir.mkdirs()
+            extractTarGz(tempFile, envSetup.rootfsDir)
+            listener?.onProgress(75, "Extraction complete")
+
+            // Step 3: Set up Ubuntu environment
+            listener?.onProgress(80, "Configuring Ubuntu environment...")
+            configureUbuntu()
+
+            listener?.onProgress(100, "Ubuntu environment ready!")
+            envSetup.setInstalled()
+            listener?.onComplete()
+        } catch (e: Exception) {
+            Log.e(TAG, "Bundled installation failed", e)
+            listener?.onError("Installation failed: ${e.message}")
+        } finally {
+            tempFile.delete()
+        }
+    }
+
     /** Download a file with progress reporting */
     private fun downloadFile(url: String, dest: File): Long {
         val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection

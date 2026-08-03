@@ -68,7 +68,7 @@ class SplashActivity : AppCompatActivity() {
 
                 // Step 2: Check if Ubuntu is installed
                 if (!envSetup.isRootfsInstalled()) {
-                    // Need to download and install Ubuntu rootfs
+                    // Need to install Ubuntu rootfs
                     installer.listener = object : UbuntuInstaller.InstallListener {
                         override fun onProgress(percent: Int, message: String) {
                             lifecycleScope.launch(Dispatchers.Main) {
@@ -98,7 +98,12 @@ class SplashActivity : AppCompatActivity() {
                             }
                         }
                     }
-                    installer.installRootfs()
+                    // Use bundled rootfs if available (arm64), otherwise download
+                    if (envSetup.isRootfsBundled()) {
+                        installer.installBundledRootfs()
+                    } else {
+                        installer.installRootfs()
+                    }
                 } else {
                     // Already installed, go to main
                     updateProgress(100, "Ready!")

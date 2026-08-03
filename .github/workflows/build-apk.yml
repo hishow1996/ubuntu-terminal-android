@@ -142,6 +142,25 @@ jobs:
           ls -la app/src/main/assets/proot/
           file app/src/main/assets/proot/*
 
+      # ── Download Ubuntu rootfs ─────────────────────────────────────
+      # Bundle the Ubuntu 22.04 minimal rootfs directly in the APK.
+      # Most Android devices are arm64-v8a, so we bundle the arm64 rootfs.
+      # For other architectures, the app falls back to runtime download.
+      # The tar.gz is ~30MB compressed, making the total APK ~40MB.
+
+      - name: Download Ubuntu rootfs
+        run: |
+          set -e
+          mkdir -p app/src/main/assets/ubuntu
+          echo "Downloading Ubuntu 22.04 base rootfs (arm64)..."
+          wget -q -O app/src/main/assets/ubuntu/ubuntu-rootfs.tar.gz \
+            "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-arm64.tar.gz"
+          echo "Downloaded rootfs:"
+          ls -lh app/src/main/assets/ubuntu/ubuntu-rootfs.tar.gz
+          # Verify it's a valid gzip
+          file app/src/main/assets/ubuntu/ubuntu-rootfs.tar.gz
+          gzip -t app/src/main/assets/ubuntu/ubuntu-rootfs.tar.gz && echo "Gzip integrity OK"
+
       - name: Build Debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
 

@@ -15,16 +15,16 @@ class EnvironmentSetup(private val context: Context) {
     companion object {
         private const val TAG = "EnvironmentSetup"
 
-        // Ubuntu rootfs download URLs
+        // Asset paths
+        private const val BUNDLED_ROOTFS_ASSET = "ubuntu/ubuntu-rootfs.tar.gz"
+
+        // Ubuntu rootfs download URLs (fallback for non-arm64 devices)
         private val UBUNTU_ROOTFS_URLS = mapOf(
             "arm64" to "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-arm64.tar.gz",
             "armhf" to "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-armhf.tar.gz",
             "x86_64" to "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-amd64.tar.gz",
             "x86" to "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-i386.tar.gz"
         )
-
-        // Fallback: LinuxUserData URL for aarch64 (alternative source)
-        private const val FALLBACK_ROOTFS_URL = "https://github.com/EXALAB/AnLinux-Resources/raw/master/Rootfs/Ubuntu/arm64/ubuntu-rootfs-arm64.tar.xz"
     }
 
     // Directories
@@ -120,6 +120,26 @@ class EnvironmentSetup(private val context: Context) {
     /** Mark as installed */
     fun setInstalled() {
         isInstalled = true
+    }
+
+    /** Check if rootfs is bundled in assets (arm64 only) */
+    fun isRootfsBundled(): Boolean {
+        return try {
+            context.assets.open(BUNDLED_ROOTFS_ASSET).use { it.available() > 0 }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** Get the InputStream for the bundled rootfs */
+    fun openBundledRootfs(): java.io.InputStream {
+        return context.assets.open(BUNDLED_ROOTFS_ASSET)
+    }
+
+    /** Get the rootfs download URL for the current architecture */
+    fun getRootfsDownloadUrl(): String {
+        val arch = getArch()
+        return UBUNTU_ROOTFS_URLS[arch] ?: UBUNTU_ROOTFS_URLS["arm64"]!!
     }
 
     /** Get the bind mount directories for PRoot */
