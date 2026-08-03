@@ -80,8 +80,8 @@ class UbuntuInstaller(private val context: Context, private val envSetup: Enviro
             connectTimeout = 30000
             readTimeout = 30000
             instanceFollowRedirects = true
-            requestProperty = "User-Agent" to "UbuntuTerminal/1.0 (Android)"
         }
+        connection.setRequestProperty("User-Agent", "UbuntuTerminal/1.0 (Android)")
 
         try {
             connection.connect()

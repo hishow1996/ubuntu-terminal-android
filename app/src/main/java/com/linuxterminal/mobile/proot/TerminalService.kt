@@ -46,6 +46,10 @@ class TerminalService : Service() {
         return START_STICKY
     }
 
+    override fun onBind(intent: Intent?): android.os.IBinder? {
+        return null
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false

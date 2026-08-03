@@ -348,7 +348,7 @@ class TerminalView @JvmOverloads constructor(
 
         // Handle Ctrl+key
         if (event.isCtrlPressed) {
-            val ch = (event.unicodeCharacter and 0x7F).toChar()
+            val ch = (event.unicodeChar and 0x7F).toChar()
             if (ch in 'a'..'z' || ch in 'A'..'Z') {
                 em.sendCtrlKey(ch)
                 return true
@@ -356,7 +356,7 @@ class TerminalView @JvmOverloads constructor(
         }
 
         // Handle regular character input
-        val ch = event.unicodeCharacter
+        val ch = event.unicodeChar
         if (ch != 0) {
             em.write(ch.toString())
             return true
