@@ -68,9 +68,9 @@ class TerminalView @JvmOverloads constructor(
     private var lastBlinkTime: Long = 0
     private val blinkInterval: Long = 500
 
-    // Theme colors
-    var backgroundColor: Int = 0xFF1E1E2E.toInt()
-    var foregroundColor: Int = 0xFFD4D4D4.toInt()
+    // Theme colors (renamed to avoid clash with View.setBackgroundColor)
+    var termBgColor: Int = 0xFF1E1E2E.toInt()
+    var termFgColor: Int = 0xFFD4D4D4.toInt()
     var cursorColor: Int = 0xFFE95420.toInt() // Ubuntu orange
     var selectionColor: Int = 0xFF264F78.toInt()
 
@@ -201,8 +201,8 @@ class TerminalView @JvmOverloads constructor(
         val buf = em.buffer
 
         // Draw background
-        bgPaint.color = backgroundColor
-        canvas.drawColor(backgroundColor)
+        bgPaint.color = termBgColor
+        canvas.drawColor(termBgColor)
 
         val cols = buf.columns
         val rows = buf.rows
@@ -226,7 +226,7 @@ class TerminalView @JvmOverloads constructor(
                     } else {
                         TerminalColors.toArgb(bg)
                     }
-                    if (bgColor != backgroundColor and 0xFFFFFF) {
+                    if (bgColor != termBgColor and 0xFFFFFF) {
                         bgPaint.color = (0xFF000000.toInt()) or bgColor
                         canvas.drawRect(
                             x, y + ascent,
@@ -278,7 +278,7 @@ class TerminalView @JvmOverloads constructor(
                 // Draw the character under cursor in background color
                 val cell = buf.getCell(buf.cursorRow, buf.cursorCol)
                 if (cell.char != ' ') {
-                    fgPaint.color = backgroundColor
+                    fgPaint.color = termBgColor
                     fgPaint.isFakeBoldText = cell.bold
                     canvas.drawText(cell.char.toString(), cursorX, cursorY - ascent, fgPaint)
                 }
