@@ -3,7 +3,7 @@
 -keep class com.linuxterminal.mobile.proot.** { *; }
 
 # Keep native method declarations
--keepclassmembersclass * {
+-keepclassmembers class * {
     native <methods>;
 }
 
