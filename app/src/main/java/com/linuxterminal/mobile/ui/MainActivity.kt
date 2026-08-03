@@ -217,22 +217,12 @@ class MainActivity : AppCompatActivity() {
             session.start(command, env, envSetup.rootfsDir.absolutePath)
         } catch (e: Exception) {
             // PRoot failed to start — show error in terminal instead of crashing
-            terminalEmulator.processBytes(
-                "\r\n*** Failed to start PRoot: ${e.message} ***\r\n\r\n".toByteArray()
-            )
-            terminalEmulator.processBytes(
-                "Library path: ${envSetup.prootLibDir.absolutePath}\r\n".toByteArray()
-            )
-            terminalEmulator.processBytes(
-                "PRoot binary: ${envSetup.prootBinary.absolutePath} (exists: ${envSetup.prootBinary.exists()})\r\n".toByteArray()
-            )
+            emulator.write("\r\n*** Failed to start PRoot: ${e.message} ***\r\n\r\n")
+            emulator.write("Library path: ${envSetup.prootLibDir.absolutePath}\r\n")
+            emulator.write("PRoot binary: ${envSetup.prootBinary.absolutePath} (exists: ${envSetup.prootBinary.exists()})\r\n")
             val libFiles = envSetup.prootLibDir.listFiles()
-            terminalEmulator.processBytes(
-                "Libraries: ${libFiles?.joinToString { it.name } ?: "none"}\r\n".toByteArray()
-            )
-            terminalEmulator.processBytes(
-                "\r\nTry reinstalling the app to fix this issue.\r\n".toByteArray()
-            )
+            emulator.write("Libraries: ${libFiles?.joinToString { it.name } ?: "none"}\r\n")
+            emulator.write("\r\nTry reinstalling the app to fix this issue.\r\n")
             terminalView.invalidate()
         }
 
