@@ -2,13 +2,20 @@ package com.linuxterminal.mobile.proot
 
 import android.content.Context
 import android.util.Log
-import com.linuxterminal.mobile.terminal.TerminalSession
+import com.linuxterminal.mobile.terminal.Pty
 import java.io.File
 
 /**
  * Builds and launches the PRoot command to run Ubuntu.
- * PRoot uses ptrace to intercept syscalls and translate paths,
- * enabling a real Ubuntu environment without root access.
+ * Uses a bash startup script approach (like OnecodeTerminal):
+ * 1. Run bash with a generated startup script
+ * 2. The script installs Ubuntu rootfs if needed (using busybox tar)
+ * 3. Then logs into Ubuntu via PRoot
+ *
+ * This approach is more robust than calling PRoot directly because:
+ * - bash handles environment setup
+ * - busybox handles tar.xz extraction
+ * - The script can handle errors gracefully
  */
 class PRootRunner(private val context: Context, private val envSetup: EnvironmentSetup) {
 
@@ -16,167 +23,213 @@ class PRootRunner(private val context: Context, private val envSetup: Environmen
         private const val TAG = "PRootRunner"
     }
 
-    /**
-     * Build the PRoot command line to launch Ubuntu bash.
-     *
-     * PRoot options:
-     * -r <path>     : Set root filesystem path
-     * -b <src:dst>  : Bind mount (src on host -> dst in guest)
-     * -b <path>     : Bind mount (same path)
-     * -w <path>     : Set working directory
-     * --link2symlink: Convert hard links to symbolic links (saves space)
-     * --kill-on-exit: Kill child processes when PRoot exits
-     * -0            : Use PRoot's built-in process tracing (default mode)
-     */
-    fun buildCommand(
-        rootfsPath: String,
-        bindMounts: List<String> = envSetup.getBindMounts(),
-        workingDir: String = "/root",
-        command: String = "/bin/bash"
-    ): List<String> {
-        val cmd = mutableListOf<String>()
-
-        // Use the wrapper script instead of calling PRoot directly.
-        // The wrapper sets LD_LIBRARY_PATH so the linker finds libtalloc.so
-        // and libandroid-shmem.so. ProcessBuilder env is unreliable on Android.
-        val wrapperScript = File(envSetup.prootDir, "run_proot.sh")
-        if (wrapperScript.exists() && wrapperScript.canExecute()) {
-            cmd.add("/system/bin/sh")
-            cmd.add(wrapperScript.absolutePath)
-        } else {
-            // Fallback: call PRoot directly (LD_LIBRARY_PATH from env)
-            cmd.add(envSetup.prootBinary.absolutePath)
-        }
-
-        // Root filesystem
-        cmd.add("-r")
-        cmd.add(rootfsPath)
-
-        // Bind mounts
-        for (mount in bindMounts) {
-            cmd.add("-b")
-            cmd.add(mount)
-        }
-
-        // Additional mounts for Android-specific paths
-        cmd.add("-b")
-        cmd.add("/proc/self/fd:/dev/fd")
-        cmd.add("-b")
-        cmd.add("/proc/self/fd/0:/dev/stdin")
-        cmd.add("-b")
-        cmd.add("/proc/self/fd/1:/dev/stdout")
-        cmd.add("-b")
-        cmd.add("/proc/self/fd/2:/dev/stderr")
-
-        // Link2symlink for space saving (important on Android)
-        cmd.add("--link2symlink")
-
-        // Set working directory
-        cmd.add("-w")
-        cmd.add(workingDir)
-
-        // Set root ID
-        cmd.add("-0")
-        cmd.add("root")
-
-        // Kill processes on exit
-        cmd.add("--kill-on-exit")
-
-        // The command to run in the chroot
-        cmd.add("/usr/bin/env")
-        cmd.add("-i")
-        cmd.add("HOME=/root")
-        cmd.add("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
-        cmd.add("TERM=xterm-256color")
-        cmd.add("LANG=C.UTF-8")
-        cmd.add("LANGUAGE=en_US:en")
-        cmd.add("SHELL=/bin/bash")
-        cmd.add("USER=root")
-        cmd.add("LOGNAME=root")
-        cmd.add("HOSTNAME=ubuntu")
-        cmd.add("PREFIX=/usr")
-        cmd.add("LC_ALL=C.UTF-8")
-
-        // Add Android-specific environment variables
-        cmd.add("ANDROID_DATA=/data")
-        cmd.add("ANDROID_ROOT=/system")
-
-        cmd.add(command)
-
-        return cmd
+    /** Get the path to the bash binary */
+    private fun getBashPath(): String {
+        return File(envSetup.binDir, "bash").absolutePath
     }
 
-    /** Build command for interactive bash login shell */
-    fun buildInteractiveCommand(): List<String> {
-        return buildCommand(
-            rootfsPath = envSetup.getRootfsPath(),
-            workingDir = "/root",
-            command = "/bin/bash"
-        )
+    /** Get the path to the proot binary */
+    private fun getProotPath(): String {
+        return File(envSetup.binDir, "proot").absolutePath
     }
 
-    /** Build command for initial setup (apt update, install packages) */
-    fun buildSetupCommand(): List<String> {
-        val cmd = buildCommand(
-            rootfsPath = envSetup.getRootfsPath(),
-            workingDir = "/root",
-            command = "/bin/bash"
-        )
-        // Add setup script as argument
-        return cmd.dropLast(1) + listOf(
-            "-c",
-            "apt-get update && apt-get install -y --no-install-recommends " +
-                "sudo wget curl nano vim less procps iproute2 " +
-                "&& apt-get clean && rm -rf /var/lib/apt/lists/*"
-        )
+    /** Get the path to the busybox binary */
+    private fun getBusyboxPath(): String {
+        return File(envSetup.binDir, "busybox").absolutePath
     }
 
-    /** Get environment variables for PRoot, including LD_LIBRARY_PATH for libtalloc */
+    /** Get environment variables for the terminal session */
     fun getEnvironment(): Map<String, String> {
-        val libPath = envSetup.prootLibDir.absolutePath
         return mapOf(
-            "HOME" to "/root",
-            "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "PATH" to "${envSetup.binDir.absolutePath}:${System.getenv("PATH")}",
+            "HOME" to envSetup.filesDir.absolutePath,
+            "PREFIX" to envSetup.usrDir.absolutePath,
+            "LD_LIBRARY_PATH" to "${envSetup.nativeLibDir}:${envSetup.binDir.absolutePath}",
+            "PROOT_LOADER" to File(envSetup.binDir, "loader").absolutePath,
+            "TMPDIR" to envSetup.tmpDir.absolutePath,
+            "PROOT_TMP_DIR" to envSetup.tmpDir.absolutePath,
             "TERM" to "xterm-256color",
-            "LANG" to "C.UTF-8",
+            "LANG" to "en_US.UTF-8",
             "LANGUAGE" to "en_US:en",
             "SHELL" to "/bin/bash",
             "USER" to "root",
             "LOGNAME" to "root",
-            "HOSTNAME" to "ubuntu",
-            "PROOT_NO_SECCOMP" to "1",
-            "PROOT_TMP_DIR" to envSetup.getProotTmpDir(),
-            "LD_LIBRARY_PATH" to libPath,
-            "LD_PRELOAD" to ""
+            "HOSTNAME" to "ubuntu"
         )
     }
 
-    /** Check if PRoot binary is ready */
-    fun isReady(): Boolean {
-        return envSetup.prootBinary.exists() &&
-               envSetup.prootBinary.canExecute() &&
-               envSetup.isRootfsInstalled()
+    /**
+     * Generate the startup script (common.sh) that handles:
+     * 1. Installing Ubuntu rootfs (extracting tarball if needed)
+     * 2. Configuring the Ubuntu environment
+     * 3. Logging into Ubuntu via PRoot
+     */
+    fun generateStartScript(): String {
+        val bashPath = getBashPath()
+        val prootPath = getProotPath()
+        val busyboxPath = getBusyboxPath()
+        val tarballPath = envSetup.getRootfsTarballPath()
+        val ubuntuPath = envSetup.ubuntuPath
+        val tmpDir = envSetup.tmpDir.absolutePath
+        val nativeLibDir = envSetup.nativeLibDir
+
+        return """
+#!/system/bin/sh
+# TuxBox startup script - generated by PRootRunner
+# Handles Ubuntu rootfs installation and PRoot login
+
+export PATH="${'$'}{envSetup.binDir.absolutePath}:${'$'}{System.getenv("PATH")}"
+export HOME="${'$'}{envSetup.filesDir.absolutePath}"
+export LD_LIBRARY_PATH="${'$'}nativeLibDir:${'$'}{envSetup.binDir.absolutePath}"
+export PROOT_LOADER="${'$'}{envSetup.binDir.absolutePath}/loader"
+export PROOT_TMP_DIR="${'$'}tmpDir"
+export TMPDIR="${'$'}tmpDir"
+export TERM="xterm-256color"
+export LANG="en_US.UTF-8"
+
+UBUNTU_HOME="${'$'}ubuntuPath"
+TARBALL="${'$'}tarballPath"
+PROOT="${'$'}prootPath"
+BUSYBOX="${'$'}busyboxPath"
+
+# Check if Ubuntu is already installed
+if [ ! -f "${'$'}{ubuntuPath}/.onecode_installed_ok" ]; then
+    echo "Installing Ubuntu rootfs..."
+    mkdir -p "${'$'}UBUNTU_HOME"
+    
+    if [ -f "${'$'}TARBALL" ]; then
+        echo "Extracting rootfs from tarball..."
+        "${'$'}BUSYBOX" tar xf "${'$'}TARBALL" -C "${'$'}UBUNTU_HOME" --strip-components=0 2>&1 || {
+            echo "Extraction failed, trying with system tar..."
+            tar xf "${'$'}TARBALL" -C "${'$'}UBUNTU_HOME" 2>&1
+        }
+        
+        if [ -d "${'$'}UBUNTU_HOME/bin" ]; then
+            echo "Rootfs extracted successfully."
+            touch "${'$'}{ubuntuPath}/.onecode_installed_ok"
+        else
+            echo "ERROR: Rootfs extraction failed!"
+            echo "Falling back to basic shell."
+            exec /system/bin/sh
+        fi
+    else
+        echo "ERROR: Rootfs tarball not found at ${'$'}TARBALL"
+        echo "Falling back to basic shell."
+        exec /system/bin/sh
+    fi
+fi
+
+# Configure Ubuntu environment
+if [ ! -f "${'$'}{ubuntuPath}/etc/resolv.conf" ] || [ ! -s "${'$'}{ubuntuPath}/etc/resolv.conf" ]; then
+    echo "nameserver 8.8.8.8" > "${'$'}{ubuntuPath}/etc/resolv.conf"
+    echo "nameserver 8.8.4.4" >> "${'$'}{ubuntuPath}/etc/resolv.conf"
+fi
+
+# Create necessary directories
+mkdir -p "${'$'}{ubuntuPath}/dev" "${'$'}{ubuntuPath}/proc" "${'$'}{ubuntuPath}/sys" "${'$'}{ubuntuPath}/tmp" "${'$'}{ubuntuPath}/root"
+
+# Set hostname if not set
+if [ ! -f "${'$'}{ubuntuPath}/etc/hostname" ]; then
+    echo "ubuntu" > "${'$'}{ubuntuPath}/etc/hostname"
+fi
+
+# Create /etc/passwd if not present
+if [ ! -f "${'$'}{ubuntuPath}/etc/passwd" ]; then
+    echo "root:x:0:0:root:/root:/bin/bash" > "${'$'}{ubuntuPath}/etc/passwd"
+fi
+
+# Create /etc/group if not present
+if [ ! -f "${'$'}{ubuntuPath}/etc/group" ]; then
+    echo "root:x:0:" > "${'$'}{ubuntuPath}/etc/group"
+fi
+
+# Create /etc/hosts if not present
+if [ ! -f "${'$'}{ubuntuPath}/etc/hosts" ]; then
+    echo "127.0.0.1 localhost" > "${'$'}{ubuntuPath}/etc/hosts"
+    echo "127.0.1.1 ubuntu" >> "${'$'}{ubuntuPath}/etc/hosts"
+fi
+
+# Login to Ubuntu via PRoot
+echo "Starting Ubuntu..."
+exec "${'$'}PROOT" \
+    -r "${'$'}UBUNTU_HOME" \
+    -b /dev \
+    -b /proc \
+    -b /sys \
+    -b /dev/urandom:/dev/random \
+    -b /proc/self/fd:/dev/fd \
+    -b /proc/self/fd/0:/dev/stdin \
+    -b /proc/self/fd/1:/dev/stdout \
+    -b /proc/self/fd/2:/dev/stderr \
+    -b "${'$'}{envSetup.binDir.absolutePath}:/usr/local/bin" \
+    --link2symlink \
+    --kill-on-exit \
+    -w /root \
+    -0 root \
+    /usr/bin/env -i \
+    HOME=/root \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    TERM=xterm-256color \
+    LANG=C.UTF-8 \
+    LANGUAGE=en_US:en \
+    SHELL=/bin/bash \
+    USER=root \
+    LOGNAME=root \
+    HOSTNAME=ubuntu \
+    /bin/bash -l
+""".trimIndent()
     }
 
-    /** Test PRoot by running a simple command */
-    fun testPRoot(): Boolean {
+    /** Write the startup script to a file */
+    fun writeStartScript(): File {
+        val scriptFile = File(envSetup.filesDir, "common.sh")
+        scriptFile.writeText(generateStartScript())
+        scriptFile.setExecutable(true, false)
+        Log.i(TAG, "Startup script written to ${scriptFile.absolutePath}")
+        return scriptFile
+    }
+
+    /**
+     * Build the command to start the terminal session.
+     * Uses bash with the startup script.
+     */
+    fun buildCommand(): List<String> {
+        val scriptFile = writeStartScript()
+        val bashPath = getBashPath()
+
+        return if (File(bashPath).exists() && File(bashPath).canExecute()) {
+            listOf(bashPath, "-c", ". ${scriptFile.absolutePath}")
+        } else {
+            // Fallback to system sh
+            listOf("/system/bin/sh", scriptFile.absolutePath)
+        }
+    }
+
+    /** Check if PRoot is ready */
+    fun isReady(): Boolean {
+        val proot = File(envSetup.binDir, "proot")
+        val busybox = File(envSetup.binDir, "busybox")
+        val bash = File(envSetup.binDir, "bash")
+        return proot.exists() && proot.canExecute() &&
+               busybox.exists() && busybox.canExecute()
+    }
+
+    
+
+    /**
+     * Start the terminal session using PTY.
+     * Returns a Pty object for I/O.
+     */
+    fun startSession(): Pty? {
+        val cmd = buildCommand().toTypedArray()
+        val env = getEnvironment()
+        val cwd = File(envSetup.filesDir.absolutePath)
+
         return try {
-            val cmd = buildCommand(
-                rootfsPath = envSetup.getRootfsPath(),
-                workingDir = "/root",
-                command = "/bin/bash"
-            )
-            val testCmd = cmd.dropLast(1) + listOf("-c", "echo 'PRoot OK'")
-            val pb = ProcessBuilder(testCmd)
-            pb.redirectErrorStream(true)
-            val process = pb.start()
-            val output = process.inputStream.bufferedReader().readText()
-            val exitCode = process.waitFor()
-            Log.i(TAG, "PRoot test output: $output (exit: $exitCode)")
-            exitCode == 0
+            Pty.start(cmd, env, cwd)
         } catch (e: Exception) {
-            Log.e(TAG, "PRoot test failed", e)
-            false
+            Log.e(TAG, "Failed to start session", e)
+            null
         }
     }
 }

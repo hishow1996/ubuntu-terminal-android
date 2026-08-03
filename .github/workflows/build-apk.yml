@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -25,124 +27,16 @@ jobs:
         with:
           gradle-version: '8.4'
 
-      # ── Download PRoot + all dependencies from Termux packages ─────
-      # PRoot depends on: libtalloc, libandroid-shmem — we bundle ALL of them.
-
-      - name: Download and extract PRoot + all libs for all architectures
+      - name: Verify assets
         run: |
-          set -e
-          mkdir -p app/src/main/assets/proot/lib
-
-          download_arch() {
-            local TERMUX_ARCH="$1"   # aarch64, arm, x86_64, i686
-            local SHORT_ARCH="$2"    # arm64, armhf, x86_64, x86
-            local WORK_DIR="/tmp/extract-$TERMUX_ARCH"
-            mkdir -p "$WORK_DIR" && cd "$WORK_DIR"
-
-            echo "=== Downloading for $TERMUX_ARCH ($SHORT_ARCH) ==="
-
-            # Get Packages index
-            wget -q -O Packages.gz \
-              "https://packages.termux.dev/apt/termux-main/dists/stable/main/binary-$TERMUX_ARCH/Packages.gz"
-            gunzip -f Packages.gz
-
-            # --- Download and extract a .deb package ---
-            extract_deb() {
-              local PKG_NAME="$1"
-              local FILE=$(grep -A 15 "^Package: $PKG_NAME$" Packages | grep '^Filename:' | awk '{print $2}' | head -1)
-              if [ -z "$FILE" ]; then
-                echo "WARNING: Package $PKG_NAME not found!"
-                return 1
-              fi
-              echo "Found $PKG_NAME: $FILE"
-              wget -q -O "$PKG_NAME.deb" "https://packages.termux.dev/apt/termux-main/$FILE"
-              # Clean up ALL previous extraction artifacts
-              rm -rf control.* data.* data control.tar.* data.tar.*
-              ar x "$PKG_NAME.deb"
-              if [ -f data.tar.xz ]; then
-                tar xf data.tar.xz
-              elif [ -f data.tar.zst ]; then
-                zstd -d data.tar.zst && tar xf data.tar
-              fi
-            }
-
-            # Download PRoot binary
-            extract_deb proot
-            local PROOT_BIN=$(find . -name proot -type f | head -1)
-            cp "$PROOT_BIN" "${GITHUB_WORKSPACE}/app/src/main/assets/proot/${SHORT_ARCH}_proot"
-            chmod +x "${GITHUB_WORKSPACE}/app/src/main/assets/proot/${SHORT_ARCH}_proot"
-
-            # Check PRoot dependencies
-            echo "--- PRoot dynamic dependencies ---"
-            readelf -d "$PROOT_BIN" 2>/dev/null | grep NEEDED || true
-
-            # Download libtalloc
-            extract_deb libtalloc
-            mkdir -p "${GITHUB_WORKSPACE}/app/src/main/assets/proot/lib/${SHORT_ARCH}"
-            find . -name 'libtalloc.so*' -exec cp {} "${GITHUB_WORKSPACE}/app/src/main/assets/proot/lib/${SHORT_ARCH}/" \;
-
-            # Download libandroid-shmem
-            rm -rf control.* data.*
-            extract_deb libandroid-shmem
-            find . -name 'libandroid-shmem.so*' -exec cp {} "${GITHUB_WORKSPACE}/app/src/main/assets/proot/lib/${SHORT_ARCH}/" \;
-
-            echo "Files for $SHORT_ARCH:"
-            ls -la "${GITHUB_WORKSPACE}/app/src/main/assets/proot/${SHORT_ARCH}_proot"
-            ls -la "${GITHUB_WORKSPACE}/app/src/main/assets/proot/lib/${SHORT_ARCH}/"
-
-            # Clean up
-            cd / && rm -rf "$WORK_DIR"
-          }
-
-          download_arch aarch64 arm64
-          download_arch arm armhf
-          download_arch x86_64 x86_64
-          download_arch i686 x86
-
-      - name: Verify PRoot binaries and libraries
-        run: |
-          echo "=== PRoot binary + library listing ==="
-          find app/src/main/assets/proot/ -type f -exec ls -la {} \;
+          echo "=== jniLibs ==="
+          ls -la app/src/main/jniLibs/arm64-v8a/
           echo ""
-          echo "--- PRoot binaries ---"
-          file app/src/main/assets/proot/*_proot
+          echo "=== assets ==="
+          ls -la app/src/main/assets/
           echo ""
-          echo "--- All .so files per arch ---"
-          find app/src/main/assets/proot/lib/ -type f | while read f; do
-            echo "$f: $(file "$f" | cut -d: -f2)"
-          done
-          echo ""
-          echo "--- Dynamic dependencies (arm64 PRoot) ---"
-          readelf -d app/src/main/assets/proot/arm64_proot 2>/dev/null | grep NEEDED || echo "readelf not available"
-          echo ""
-          # Verify critical libraries are present
-          for arch in arm64 armhf x86_64 x86; do
-            echo "=== Checking $arch ==="
-            ls app/src/main/assets/proot/lib/$arch/ 2>/dev/null || echo "WARNING: No lib dir for $arch!"
-          done
-
-      # ── Download Ubuntu rootfs ─────────────────────────────────────
-      # Bundle the Ubuntu 22.04 minimal rootfs directly in the APK.
-
-      - name: Download Ubuntu rootfs
-        run: |
-          set -e
-          mkdir -p app/src/main/assets/ubuntu
-          echo "Downloading Ubuntu 22.04 base rootfs (arm64)..."
-          wget -q -O app/src/main/assets/ubuntu/ubuntu-rootfs.tar.gz \
-            "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-arm64.tar.gz"
-          echo "Downloaded rootfs:"
-          ls -lh app/src/main/assets/ubuntu/ubuntu-rootfs.tar.gz
-          file app/src/main/assets/ubuntu/ubuntu-rootfs.tar.gz
-          gzip -t app/src/main/assets/ubuntu/ubuntu-rootfs.tar.gz && echo "Gzip integrity OK"
-
-      - name: Verify final assets
-        run: |
-          echo "=== Final assets tree ==="
-          find app/src/main/assets/ -type f | sort
-          echo ""
-          echo "=== Total assets size ==="
-          du -sh app/src/main/assets/
+          echo "=== JNI source ==="
+          ls -la app/src/main/jni/
 
       - name: Build Debug APK
         run: gradle assembleDebug --no-daemon --stacktrace

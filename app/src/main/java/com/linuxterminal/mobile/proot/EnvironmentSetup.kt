@@ -3,37 +3,34 @@ package com.linuxterminal.mobile.proot
 import android.content.Context
 import android.util.Log
 import java.io.File
-import java.io.FileOutputStream
-import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.Paths
 
 /**
- * Manages the PRoot binary and Ubuntu rootfs setup.
- * Handles downloading, extracting, and launching the Ubuntu environment.
+ * Manages the Ubuntu environment setup using PRoot.
+ * Uses jniLibs for native binaries (Android auto-extracts to nativeLibraryDir).
+ * Uses symlinks to create correctly-named library files in a writable directory.
+ *
+ * Architecture based on OnecodeTerminal.
  */
 class EnvironmentSetup(private val context: Context) {
 
     companion object {
         private const val TAG = "EnvironmentSetup"
-
-        // Asset paths
-        private const val BUNDLED_ROOTFS_ASSET = "ubuntu/ubuntu-rootfs.tar.gz"
-
-        // Ubuntu rootfs download URLs (fallback for non-arm64 devices)
-        private val UBUNTU_ROOTFS_URLS = mapOf(
-            "arm64" to "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-arm64.tar.gz",
-            "armhf" to "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-armhf.tar.gz",
-            "x86_64" to "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-amd64.tar.gz",
-            "x86" to "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04-base-i386.tar.gz"
-        )
+        private const val UBUNTU_FILENAME = "ubuntu-noble-aarch64-pd-v4.18.0.tar.xz"
+        private const val UBUNTU_NAME = "ubuntu-noble-aarch64"
     }
 
     // Directories
-    val dataDir: File = File(context.filesDir, "ubuntu")
-    val rootfsDir: File = File(dataDir, "rootfs")
-    val prootDir: File = File(dataDir, "proot")
-    val prootBinary: File = File(prootDir, "proot")
-    val prootLibDir: File = File(prootDir, "lib")
-    val tmpDir: File = File(dataDir, "tmp")
+    val filesDir: File = context.filesDir
+    val usrDir: File = File(filesDir, "usr")
+    val binDir: File = File(usrDir, "bin")
+    val tmpDir: File = File(filesDir, "tmp")
+    val nativeLibDir: String = context.applicationInfo.nativeLibraryDir
+
+    // Rootfs paths
+    val prootDistroPath: String = "${usrDir.absolutePath}/var/lib/proot-distro"
+    val ubuntuPath: String = "$prootDistroPath/installed-rootfs/ubuntu"
 
     // Status
     var isInstalled: Boolean = false
@@ -51,103 +48,126 @@ class EnvironmentSetup(private val context: Context) {
         }
     }
 
-    /** Check if PRoot binary is available */
-    fun isPRootAvailable(): Boolean {
-        // Check if we have a bundled binary in assets
-        val arch = getArch()
-        val assetName = "proot/${arch}_proot"
-        try {
-            context.assets.open(assetName).use { stream ->
-                return true
-            }
-        } catch (e: IOException) {
-            // Check if already extracted
-            return prootBinary.exists() && prootBinary.canExecute() && prootLibDir.exists()
-        }
-    }
-
-    /** Copy PRoot binary and all libraries from assets to data directory.
-     *  Always extracts — no caching, because new versions may add new .so files. */
-    fun extractPRootBinary(): Boolean {
-        val arch = getArch()
-        val assetName = "proot/${arch}_proot"
-
+    /** Check if rootfs is bundled in assets */
+    fun isRootfsBundled(): Boolean {
         return try {
-            prootDir.mkdirs()
-            prootBinary.parentFile?.mkdirs()
-
-            // Always re-extract the PRoot binary
-            context.assets.open(assetName).use { input ->
-                FileOutputStream(prootBinary).use { output ->
-                    input.copyTo(output)
-                }
-            }
-            prootBinary.setExecutable(true, true)
-            Log.i(TAG, "PRoot binary extracted to ${prootBinary.absolutePath}")
-
-            // Always re-extract all .so files (libtalloc, libandroid-shmem, etc.)
-            prootLibDir.mkdirs()
-            // Clear old .so files first
-            prootLibDir.listFiles()?.forEach { it.delete() }
-
-            val libAssetPath = "proot/lib/$arch"
-            val libFiles = context.assets.list(libAssetPath) ?: emptyArray()
-            Log.i(TAG, "Found ${libFiles.size} library files in assets for arch=$arch")
-            for (libFile in libFiles) {
-                val libPath = "$libAssetPath/$libFile"
-                val destFile = File(prootLibDir, libFile)
-                context.assets.open(libPath).use { input ->
-                    FileOutputStream(destFile).use { output ->
-                        input.copyTo(output)
-                    }
-                }
-                destFile.setExecutable(true, true)
-                destFile.setReadable(true, true)
-                Log.i(TAG, "Extracted library: ${destFile.name} (${destFile.length()} bytes)")
-            }
-
-            // Also create a wrapper script that sets LD_LIBRARY_PATH
-            // This is more reliable than relying on ProcessBuilder env
-            val wrapperScript = File(prootDir, "run_proot.sh")
-            wrapperScript.writeText("""#!/system/bin/sh
-export LD_LIBRARY_PATH=${prootLibDir.absolutePath}
-export PROOT_TMP_DIR=${tmpDir.absolutePath}
-export PROOT_NO_SECCOMP=1
-exec ${prootBinary.absolutePath} "$@"
-""")
-            wrapperScript.setExecutable(true, true)
-            Log.i(TAG, "Wrapper script created at ${wrapperScript.absolutePath}")
-
-            true
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to extract PRoot from assets", e)
-            // Try downloading from a URL as fallback
+            val files = context.assets.list("") ?: return false
+            files.any { it == UBUNTU_FILENAME }
+        } catch (e: Exception) {
             false
         }
     }
 
-    /** Check if Ubuntu rootfs is installed */
+    /** Check if rootfs is already extracted */
     fun isRootfsInstalled(): Boolean {
-        return File(rootfsDir, "bin/bash").exists()
+        val okFile = File(ubuntuPath, ".onecode_installed_ok")
+        return okFile.exists()
     }
 
-    /** Get the rootfs download URL for the current architecture */
-    fun getRootfsUrl(): String {
-        val arch = getArch()
-        return UBUNTU_ROOTFS_URLS[arch] ?: UBUNTU_ROOTFS_URLS["arm64"]!!
-    }
+    /** Get the rootfs tarball path in assets */
+    fun getRootfsAssetName(): String = UBUNTU_FILENAME
 
-    /** Get the rootfs download size estimate (for progress display) */
-    fun getRootfsDownloadSizeEstimate(): Long {
-        return 30L * 1024 * 1024 // ~30MB for ubuntu-base
-    }
+    /** Get the rootfs tarball path on device */
+    fun getRootfsTarballPath(): String = "${filesDir.absolutePath}/$UBUNTU_FILENAME"
 
-    /** Set up directories */
-    fun setupDirectories() {
-        dataDir.mkdirs()
-        rootfsDir.mkdirs()
-        prootDir.mkdirs()
+    /** Create necessary directories */
+    fun createDirectories() {
+        usrDir.mkdirs()
+        binDir.mkdirs()
         tmpDir.mkdirs()
+        File(prootDistroPath).mkdirs()
+    }
+
+    /**
+     * Link native libraries from nativeLibDir to binDir using symlinks.
+     * Android extracts .so files from jniLibs to nativeLibDir automatically.
+     * We create symlinks with correct names so the linker can find them.
+     */
+    fun linkNativeLibs() {
+        Log.d(TAG, "Linking native libraries from: $nativeLibDir")
+        val nativeLibDirFile = File(nativeLibDir)
+        if (!nativeLibDirFile.exists() || !nativeLibDirFile.isDirectory) {
+            Log.e(TAG, "Native library directory not found!")
+            return
+        }
+
+        nativeLibDirFile.listFiles()?.forEach { file ->
+            Log.d(TAG, "  - ${file.name} (${file.length()} bytes)")
+        }
+
+        val busybox = File(binDir, "busybox")
+        val busyboxSo = File(nativeLibDir, "libbusybox.so")
+
+        // Link busybox first
+        if (busyboxSo.exists()) {
+            try {
+                Files.deleteIfExists(busybox.toPath())
+                busyboxSo.setExecutable(true, false)
+                Files.createSymbolicLink(busybox.toPath(), busyboxSo.toPath())
+                Log.d(TAG, "Created busybox symlink")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create busybox link", e)
+            }
+        }
+
+        // Create busybox applet symlinks
+        val applets = listOf(
+            "awk", "ash", "basename", "bzip2", "cp", "chmod", "cut", "cat",
+            "du", "dd", "find", "grep", "gzip", "head", "id", "mkdir",
+            "realpath", "rm", "sed", "stat", "sh", "tr", "tar", "uname",
+            "xargs", "xz", "ln", "ls", "mv", "touch"
+        )
+        for (applet in applets) {
+            val link = File(binDir, applet)
+            try {
+                Files.deleteIfExists(link.toPath())
+                Files.createSymbolicLink(link.toPath(), Paths.get("busybox"))
+            } catch (e: Exception) {
+                // Ignore individual failures
+            }
+        }
+
+        // Link other native libraries
+        val libraries = mapOf(
+            "libproot.so" to "proot",
+            "libloader.so" to "loader",
+            "liblibtalloc.so.2.so" to "libtalloc.so.2",
+            "libbash.so" to "bash",
+            "libsudo.so" to "sudo"
+        )
+
+        libraries.forEach { (libName, linkName) ->
+            val libFile = File(nativeLibDir, libName)
+            val linkFile = File(binDir, linkName)
+
+            if (!libFile.exists()) {
+                Log.w(TAG, "Native library not found: $libName")
+                return@forEach
+            }
+
+            try {
+                Files.deleteIfExists(linkFile.toPath())
+                libFile.setExecutable(true, false)
+                Files.createSymbolicLink(linkFile.toPath(), libFile.toPath())
+                Log.d(TAG, "Created $linkName -> $libName")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create $linkName link", e)
+            }
+        }
+    }
+
+    /** Extract the bundled rootfs tarball from assets to filesDir */
+    fun extractRootfsTarball() {
+        val assetFile = File(filesDir, UBUNTU_FILENAME)
+        if (!assetFile.exists()) {
+            Log.d(TAG, "Extracting $UBUNTU_FILENAME from assets...")
+            context.assets.open(UBUNTU_FILENAME).use { input ->
+                assetFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            Log.d(TAG, "Rootfs tarball extracted: ${assetFile.length()} bytes")
+        }
     }
 
     /** Mark as installed */
@@ -155,63 +175,17 @@ exec ${prootBinary.absolutePath} "$@"
         isInstalled = true
     }
 
-    /** Check if rootfs is bundled in assets (arm64 only) */
-    fun isRootfsBundled(): Boolean {
-        return try {
-            // Use assets.list() — most reliable way to check if asset exists
-            // available() and read() are unreliable for large compressed assets
-            val files = context.assets.list("ubuntu") ?: return false
-            files.any { it == "ubuntu-rootfs.tar.gz" }
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    /** Get the InputStream for the bundled rootfs */
-    fun openBundledRootfs(): java.io.InputStream {
-        return context.assets.open(BUNDLED_ROOTFS_ASSET)
-    }
-
-    /** Get the rootfs download URL for the current architecture */
-    fun getRootfsDownloadUrl(): String {
-        val arch = getArch()
-        return UBUNTU_ROOTFS_URLS[arch] ?: UBUNTU_ROOTFS_URLS["arm64"]!!
-    }
-
-    /** Get the bind mount directories for PRoot */
-    fun getBindMounts(): List<String> {
-        return listOf(
-            "/dev",
-            "/proc",
-            "/sys",
-            "/dev/urandom:/dev/random"
-        )
-    }
-
-    /** Get the PRoot working directory (rootfs path) */
-    fun getRootfsPath(): String = rootfsDir.absolutePath
-
     /** Get the PRoot tmp directory */
     fun getProotTmpDir(): String = tmpDir.absolutePath
 
-    /** Clean up the environment (delete rootfs) */
+    /** Clean up */
     fun cleanup() {
         try {
-            rootfsDir.deleteRecursively()
-            prootBinary.delete()
+            File(ubuntuPath).deleteRecursively()
+            File(filesDir, UBUNTU_FILENAME).delete()
             isInstalled = false
         } catch (e: Exception) {
             Log.e(TAG, "Cleanup error", e)
         }
-    }
-
-    /** Get total size of the rootfs */
-    fun getRootfsSize(): Long {
-        return getDirSize(rootfsDir)
-    }
-
-    private fun getDirSize(dir: File): Long {
-        if (!dir.exists()) return 0
-        return dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
     }
 }

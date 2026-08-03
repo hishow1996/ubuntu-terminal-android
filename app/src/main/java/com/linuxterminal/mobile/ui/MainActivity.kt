@@ -13,6 +13,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.linuxterminal.mobile.R
+import java.io.File
 import com.linuxterminal.mobile.proot.EnvironmentSetup
 import com.linuxterminal.mobile.proot.PRootRunner
 import com.linuxterminal.mobile.proot.TerminalService
@@ -168,19 +169,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startTerminalSession() {
-        if (!prootRunner.isReady()) {
-            Toast.makeText(this, "Environment not ready. Please restart the app.", Toast.LENGTH_LONG).show()
-            // Show a message in the terminal
-            emulator.write("Ubuntu environment is not ready. Please restart the app.\r\n")
-            emulator.write("If this persists, clear app data and try again.\r\n")
-            return
-        }
-
         session = TerminalSession(emulator)
         session.listener = object : TerminalSession.SessionListener {
             override fun onProcessStarted() {
                 lifecycleScope.launch(Dispatchers.Main) {
-                    titleText.text = "Ubuntu Terminal"
+                    titleText.text = "TuxBox"
                     TerminalService.start(this@MainActivity)
                 }
             }
@@ -210,19 +203,25 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Build and start PRoot command
+        // Start terminal via PTY using the PRoot startup script
         try {
-            val command = prootRunner.buildInteractiveCommand()
-            val env = prootRunner.getEnvironment()
-            session.start(command, env, envSetup.rootfsDir.absolutePath)
+            val pty = prootRunner.startSession()
+            if (pty != null) {
+                session.startWithPty(pty)
+            } else {
+                emulator.write("\r\n*** Failed to create PTY session ***\r\n")
+                emulator.write("PRoot path: ${File(envSetup.binDir, "proot").absolutePath}\r\n")
+                emulator.write("Exists: ${File(envSetup.binDir, "proot").exists()}\r\n")
+                emulator.write("Busybox: ${File(envSetup.binDir, "busybox").exists()}\r\n")
+                emulator.write("Bash: ${File(envSetup.binDir, "bash").exists()}\r\n")
+                emulator.write("nativeLibDir: ${envSetup.nativeLibDir}\r\n")
+                File(envSetup.nativeLibDir).listFiles()?.forEach {
+                    emulator.write("  ${it.name}\r\n")
+                }
+                terminalView.invalidate()
+            }
         } catch (e: Exception) {
-            // PRoot failed to start — show error in terminal instead of crashing
-            emulator.write("\r\n*** Failed to start PRoot: ${e.message} ***\r\n\r\n")
-            emulator.write("Library path: ${envSetup.prootLibDir.absolutePath}\r\n")
-            emulator.write("PRoot binary: ${envSetup.prootBinary.absolutePath} (exists: ${envSetup.prootBinary.exists()})\r\n")
-            val libFiles = envSetup.prootLibDir.listFiles()
-            emulator.write("Libraries: ${libFiles?.joinToString { it.name } ?: "none"}\r\n")
-            emulator.write("\r\nTry reinstalling the app to fix this issue.\r\n")
+            emulator.write("\r\n*** Error: ${e.message} ***\r\n")
             terminalView.invalidate()
         }
 
