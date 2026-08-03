@@ -210,7 +210,13 @@ class UbuntuInstaller(private val context: Context, private val envSetup: Enviro
     /** Try to use the system tar command for extraction */
     private fun trySystemTarExtract(tarGzFile: File, destDir: File): Boolean {
         return try {
-            val pb = ProcessBuilder("tar", "-xzf", tarGzFile.absolutePath, "-C", destDir.absolutePath)
+            // --no-same-owner: skip chown (not permitted without root on Android)
+            // --no-same-permissions: skip chmod to avoid permission errors
+            val pb = ProcessBuilder("tar",
+                "--no-same-owner",
+                "--no-same-permissions",
+                "-xzf", tarGzFile.absolutePath,
+                "-C", destDir.absolutePath)
             pb.redirectErrorStream(true)
             val process = pb.start()
             val reader = BufferedReader(InputStreamReader(process.inputStream))
@@ -218,11 +224,26 @@ class UbuntuInstaller(private val context: Context, private val envSetup: Enviro
             var line: String?
             while (reader.readLine().also { line = it } != null) {
                 output.appendLine(line)
+                // Log warnings but continue
+                if (line!!.contains("Operation not permitted") ||
+                    line.contains("Cannot")) {
+                    Log.w(TAG, "tar warning: $line")
+                }
             }
             val exitCode = process.waitFor()
-            if (exitCode == 0) {
-                Log.i(TAG, "System tar extraction successful")
-                true
+            // exit 0 = success, exit 1 = minor errors (like chown warnings) but files extracted OK
+            // exit 2 = serious error
+            if (exitCode == 0 || exitCode == 1) {
+                Log.i(TAG, "System tar extraction completed (exit $exitCode)")
+                // Verify extraction actually produced files
+                val extractedFiles = destDir.walkTopDown().count { it.isFile }
+                if (extractedFiles > 0) {
+                    Log.i(TAG, "Extracted $extractedFiles files")
+                    true
+                } else {
+                    Log.e(TAG, "tar exited OK but no files extracted")
+                    false
+                }
             } else {
                 Log.w(TAG, "System tar failed (exit $exitCode): $output")
                 false
@@ -239,15 +260,26 @@ class UbuntuInstaller(private val context: Context, private val envSetup: Enviro
         // We'll use a runtime exec with toybox/busybox tar, which is available on Android 6+.
         try {
             val tarPath = "/system/bin/tar"
-            val pb = ProcessBuilder(tarPath, "-xzf", tarGzFile.absolutePath, "-C", destDir.absolutePath)
+            // --no-same-owner: skip chown (not permitted without root on Android)
+            val pb = ProcessBuilder(tarPath,
+                "--no-same-owner",
+                "--no-same-permissions",
+                "-xzf", tarGzFile.absolutePath,
+                "-C", destDir.absolutePath)
             pb.redirectErrorStream(true)
             val process = pb.start()
             val output = BufferedReader(InputStreamReader(process.inputStream)).readText()
             val exitCode = process.waitFor()
-            if (exitCode != 0) {
+            // exit 0 = success, exit 1 = minor errors (chown warnings) but files extracted OK
+            if (exitCode != 0 && exitCode != 1) {
                 throw IOException("tar extraction failed (exit $exitCode): $output")
             }
-            Log.i(TAG, "Extraction complete")
+            // Verify files were extracted
+            val extractedFiles = destDir.walkTopDown().count { it.isFile }
+            if (extractedFiles == 0) {
+                throw IOException("tar completed but no files were extracted")
+            }
+            Log.i(TAG, "Extraction complete: $extractedFiles files (exit $exitCode)")
         } catch (e: Exception) {
             Log.e(TAG, "Java tar extraction failed", e)
             // Last resort: try gzip decompression + manual tar parsing
